@@ -311,8 +311,9 @@
                 const perfectVY = -Math.sqrt(2 * g * distance); 
 
                 const createFruit = (text, isLeft, color) => {
-                    const x = isLeft ? width * 0.25 : width * 0.75;
-                    const vx = isLeft ? (Math.random() * 0.8 + 0.5) : -(Math.random() * 0.8 + 0.5);
+                    const x = isLeft ? width * 0.2 : width * 0.8;
+                    // Move OUTWARD to ensure no overlap
+                    const vx = isLeft ? -(Math.random() * 0.5 + 0.5) : (Math.random() * 0.5 + 0.5);
                     return new Fruit(text, x, startY, vx, perfectVY, color);
                 };
 
