@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>Arabic Ninja - Mastery Challenge 🥷</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; }
+        body { font-family: 'Cairo', sans-serif; color: #fff; user-select: none; -webkit-user-select: none; touch-action: none; }
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+
+        /* Screens */
+        .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; transition: opacity 0.4s, transform 0.4s; }
+        .screen.hidden { opacity: 0; pointer-events: none; transform: scale(1.1); display: none; }
+        .screen.active { opacity: 1; pointer-events: auto; transform: scale(1); display: flex; }
+
+        /* Menu Styling */
+        #s-menu { background: radial-gradient(circle at center, #1e1e1e 0%, #0a0a0a 100%); gap: 2.5rem; }
+        .logo { font-family: 'Amiri', serif; font-size: clamp(3.5rem, 12vw, 7.5rem); font-weight: 700; color: #FFD700; text-shadow: 0 0 40px rgba(255, 215, 0, 0.4), 2px 2px 10px #000; text-align: center; line-height: 1; }
+        .ninja-icon { font-size: 8rem; animation: float 4s ease-in-out infinite; filter: drop-shadow(0 0 30px rgba(255, 215, 0, 0.3)); }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(-2deg); }
+            50% { transform: translateY(-25px) rotate(2deg); }
+        }
+
+        /* Buttons */
+        .btn-gold { 
+            background: linear-gradient(135deg, #FFD700, #FFF9C4, #FFD700); 
+            border: none; color: #000; font-size: 1.8rem; font-weight: 900; 
+            padding: 1.2rem 4rem; border-radius: 60px; cursor: pointer; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.8);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-gold:hover { transform: scale(1.08); box-shadow: 0 15px 35px rgba(255, 215, 0, 0.4); }
+        .btn-gold:active { transform: scale(0.96); }
+
+        .btn-ghost { 
+            background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.2);
+            color: #fff; padding: 1rem 2.5rem; border-radius: 40px; cursor: pointer; font-weight: 700;
+            transition: 0.3s; font-size: 1.2rem;
+        }
+        .btn-ghost:hover { background: rgba(255, 255, 255, 0.15); border-color: #fff; }
+
+        /* HUD */
+        #hud { 
+            position: fixed; top: 0; left: 0; right: 0; padding: 2rem; 
+            display: flex; justify-content: space-between; align-items: center; z-index: 20; 
+            pointer-events: none;
+        }
+        .hearts { display: flex; gap: 1rem; pointer-events: auto; }
+        .heart { font-size: 3.5rem; filter: drop-shadow(0 0 15px red); transition: 0.5s; }
+        .heart.lost { opacity: 0.1; transform: scale(0.6) rotate(-45deg); filter: grayscale(1); }
+        .progress-val { font-size: 3rem; font-weight: 900; color: #FFD700; text-shadow: 0 0 20px rgba(0,0,0,0.9); font-family: 'Cairo', sans-serif; }
+
+        /* Debug Logger */
+        #audio-debug { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); font-size: 10px; color: #aaa; z-index: 100; pointer-events: none; max-width: 200px; }
+
+        /* Results */
+        .result-box { background: rgba(10,10,10,0.98); border: 5px solid #FFD700; border-radius: 50px; padding: 5rem; text-align: center; box-shadow: 0 0 100px rgba(0,0,0,1); position: relative; overflow: hidden; }
+        .result-title { font-size: 5rem; font-weight: 900; margin-bottom: 2rem; }
+
+        /* Victory Graphics */
+        .confetti { position: absolute; width: 10px; height: 10px; background: #FFD700; animation: fall 3s linear infinite; }
+        @keyframes fall {
+            to { transform: translateY(100vh) rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="flash"></div>
+    <div id="audio-debug"></div>
+
+    <!-- Screen: Menu -->
+    <div id="s-menu" class="screen active">
+        <div class="ninja-icon">🥷</div>
+        <h1 class="logo">Arabic Ninja</h1>
+        <button class="btn-gold" id="btn-play">▶ Start Mission</button>
+    </div>
+
+    <!-- Screen: Mode Selection -->
+    <div id="s-mode" class="screen hidden">
+        <h2 style="font-size: 3.5rem; margin-bottom: 3rem;">Select Challenge</h2>
+        <div style="display: flex; gap: 3rem; flex-wrap: wrap; justify-content: center;">
+            <button class="btn-gold" id="mode-ortho" style="min-width: 320px;">Similar Shapes</button>
+            <button class="btn-gold" id="mode-phone" style="min-width: 320px;">Similar Sounds</button>
+        </div>
+        <button class="btn-ghost" style="margin-top: 4rem;" id="btn-back-menu">← Back to Menu</button>
+    </div>
+
+    <!-- Screen: Game Over -->
+    <div id="s-over" class="screen hidden">
+        <div class="result-box">
+            <div class="result-title" style="color: #ff4444;">MISSION FAILED</div>
+            <div style="font-size: 2.5rem; margin-bottom: 3rem;">Points Earned: <span id="over-correct" style="color: #FFD700;">0</span></div>
+            <div style="display: flex; gap: 2rem; justify-content: center;">
+                <button class="btn-gold" id="btn-retry">Try Again</button>
+                <button class="btn-ghost" id="btn-menu-over">Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen: Victory -->
+    <div id="s-win" class="screen hidden">
+        <div class="result-box" id="victory-box">
+            <div class="result-title" style="color: #FFD700;">VICTORY! 👑</div>
+            <p style="font-size: 2.5rem; margin-bottom: 3rem;">You are a True Ninja Master!</p>
+            <div style="display: flex; gap: 2rem; justify-content: center;">
+                <button class="btn-gold" id="btn-replay">Play Again</button>
+                <button class="btn-ghost" id="btn-menu-win">Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" style="display: none;">
+        <div class="hearts">
+            <span class="heart" id="h1">❤️</span>
+            <span class="heart" id="h2">❤️</span>
+            <span class="heart" id="h3">❤️</span>
+        </div>
+        <div class="progress-val"><span id="curr-val">0</span> / <span id="total-val">0</span></div>
+        <button class="btn-ghost" id="btn-exit-game" style="pointer-events: auto;">❌ Quit</button>
+    </div>
+
+    <script>
+        // RELATIVE PATHS FOR VERCEL DEPLOYMENT
+        const BASE_DIR = "abcVocals/";
+        const MENU_SONG_PATH = BASE_DIR + "abc song.mp3";
+        const SLICE_SOUND_PATH = BASE_DIR + "666herohero-slash-21834.mp3";
+
+        const SOUND_FILES = {
+            'أ': 'ءا.m4a', 'ب': 'ب.m4a', 'ت': 'تا.m4a', 'ث': 'ثا.m4a', 'ج': 'جا.m4a', 
+            'ح': 'حا.m4a', 'خ': 'خا.m4a', 'د': 'دا.m4a', 'ذ': 'ذا.m4a', 'ر': 'را.m4a', 
+            'ز': 'زا.m4a', 'س': 'س.m4a', 'ش': 'شا.m4a', 'ص': 'صا.m4a', 'ض': 'ضا.m4a', 
+            'ط': 'طا.m4a', 'ظ': 'ظا.m4a', 'ع': 'عا.m4a', 'غ': 'غا.m4a', 'ف': 'trimmed/فا.m4a', 
+            'ق': 'ققا.m4a', 'ك': 'كا.m4a', 'ل': 'trimmed/لَ.m4a', 'م': 'ما.m4a', 'ن': 'نا.m4a', 
+            'ه': 'ها.m4a', 'و': 'وا.m4a', 'ي': 'ي.m4a', 'ة': 'تا.m4a', 'ء': 'ءا.m4a', 
+            'ئ': 'ءي.m4a', 'بـ': 'ب.m4a', 'تـ': 'تا.m4a', 'ثـ': 'ثا.m4a', 'يـ': 'ي.m4a',
+            'نـ': 'نا.m4a', 'ئـ': 'ءي.m4a', 'عــ': 'عا.m4a', 'غــ': 'غا.m4a', 'ــعــ': 'عا.m4a',
+            'ــغــ': 'غا.m4a', 'ــع': 'عا.m4a', 'ــغ': 'غا.m4a', 'فــ': 'trimmed/فا.m4a', 'قــ': 'ققا.m4a',
+            'ــفــ': 'trimmed/فا.m4a', 'ــقــ': 'ققا.m4a', 'ـق': 'ققا.m4a', 'ـة': 'تا.m4a', 'ـه': 'ها.m4a',
+            'ـلـ': 'trimmed/لَ.m4a', 'ـا': 'trimmed/Alif.m4a', 'ــمـ': 'ما.m4a', 'ــهــ': 'ها.m4a',
+            'فـ': 'trimmed/فا.m4a', 'قـ': 'ققا.m4a', 'ـفـ': 'trimmed/فا.m4a', 'ـقـ': 'ققا.m4a'
+        };
+
+        const PALETTE = ["#F3E5F5", "#E1F5FE", "#E8F5E9", "#FFF9C4", "#F1DDCF"];
+
+        const GROUPS_ORTHO = [
+            { items: ['بـ', 'تـ', 'ثـ', 'يـ', 'نـ', 'ئـ'] },
+            { items: ['ج', 'ح', 'خ'] },
+            { items: ['د', 'ذ'] },
+            { items: ['ر', 'ز'] },
+            { items: ['س', 'ش'] },
+            { items: ['ص', 'ض'] },
+            { items: ['ط', 'ظ'] },
+            { items: ['ع', 'غ'] },
+            { items: ['ــعــ', 'ــغــ'] },
+            { items: ['ــع', 'ــغ'] },
+            { items: ['ف', 'ق'] },
+            { items: ['ــفــ', 'ــقــ'] },
+            { items: ['ـق', 'ـة'] },
+            { items: ['ـه', 'ـة'] },
+            { items: ['ـلـ', 'ـا'] },
+            { items: ['د', 'ذ', 'ر', 'ز'] },
+            { items: ['عــ', 'ء'] },
+            { items: ['ــمـ', 'ــهــ'] }
+        ];
+
+        const GROUPS_PHONE = [
+            { items: ['ت', 'ط'] }, { items: ['س', 'ص'] }, { items: ['ع', 'ء'] }, 
+            { items: ['د', 'ض'] }, { items: ['ظ', 'ذ'] }, { items: ['ك', 'ج'] }, 
+            { items: ['ث', 'ذ'] }, { items: ['م', 'ن'] }
+        ];
+
+        const menuMusic = new Audio(MENU_SONG_PATH); menuMusic.loop = true;
+        const sliceSound = new Audio(SLICE_SOUND_PATH);
+
+        function logAudio(msg) {
+            const el = document.getElementById('audio-debug');
+            el.innerText = msg;
+            console.log("[Audio Debug]", msg);
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; }
+        window.addEventListener('resize', resize); resize();
+
+        let gameState = 'menu';
+        let currentMode = 'ortho';
+        let challenges = [];
+        let currentChallengeIndex = 0;
+        let lives = 3;
+        let fruits = [];
+        let particles = [];
+        let trails = [];
+        let splitFruits = [];
+        let splashes = [];
+        let score = 0;
+        let isDrawing = false;
+        let lastPos = null;
+
+        class Fruit {
+            constructor(text, x, y, vx, vy, color) {
+                this.text = text; this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.color = color;
+                this.radius = Math.min(width, height) * 0.12; 
+                this.rotation = (Math.random() - 0.5) * 0.5;
+                this.vRotation = (Math.random() - 0.5) * 0.04;
+                this.isTarget = false; this.sliced = false; this.gravity = 0.22;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy; this.vy += this.gravity;
+                this.rotation += this.vRotation;
+                if (Math.abs(this.rotation) > 0.8) this.vRotation *= -1;
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.rotation);
+                ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(0, this.radius * 0.15, this.radius, this.radius * 0.9, 0, 0, Math.PI * 2); ctx.fill();
+                const grad = ctx.createRadialGradient(-this.radius * 0.3, -this.radius * 0.3, 0, 0, 0, this.radius);
+                grad.addColorStop(0, '#fff'); grad.addColorStop(0.2, this.color); grad.addColorStop(1, this.color);
+                ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.ellipse(-this.radius*0.4, -this.radius*0.4, this.radius*0.3, this.radius*0.15, Math.PI/4, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#000'; ctx.font = `bold ${this.radius * 1.1}px 'Amiri', serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2; ctx.strokeText(this.text, 0, 0); ctx.fillText(this.text, 0, 0);
+                ctx.restore();
+            }
+        }
+
+        class SplitFruit {
+            constructor(text, x, y, vx, vy, rotation, color, side) {
+                this.text = text; this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.rotation = rotation; this.color = color; this.side = side;
+                this.vRotation = (Math.random() - 0.5) * 0.2; this.radius = Math.min(width, height) * 0.12; this.alpha = 1;
+            }
+            update() { this.x += this.vx; this.y += this.vy; this.vy += 0.3; this.rotation += this.vRotation; this.alpha -= 0.02; }
+            draw() {
+                ctx.save(); ctx.globalAlpha = this.alpha; ctx.translate(this.x, this.y); ctx.rotate(this.rotation);
+                ctx.beginPath(); if (this.side === -1) ctx.rect(-this.radius, -this.radius, this.radius, this.radius * 2); else ctx.rect(0, -this.radius, this.radius, this.radius * 2); ctx.clip();
+                ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#000'; ctx.font = `bold ${this.radius * 1.1}px 'Amiri', serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(this.text, 0, 0); ctx.restore();
+            }
+        }
+
+        class Splash {
+            constructor(x, y, color) { this.x = x; this.y = y; this.color = color; this.radius = Math.random() * 80 + 40; this.alpha = 0.8; this.scale = 0.5; }
+            update() { this.scale += 0.05; this.alpha -= 0.03; }
+            draw() { ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.radius * this.scale, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x; this.y = y; this.color = color;
+                const ang = Math.random() * Math.PI * 2; const spd = Math.random() * 12 + 4;
+                this.vx = Math.cos(ang) * spd; this.vy = Math.sin(ang) * spd; this.size = Math.random() * 10 + 5; this.alpha = 1;
+            }
+            update() { this.x += this.vx; this.y += this.vy; this.vy += 0.25; this.alpha -= 0.03; }
+            draw() { ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill(); ctx.restore(); }
+        }
+
+        function initChallenges(mode) {
+            const groups = mode === 'ortho' ? GROUPS_ORTHO : GROUPS_PHONE;
+            challenges = [];
+            groups.forEach(g => {
+                const items = g.items;
+                for (let i = 0; i < items.length; i++) {
+                    for (let j = 0; j < items.length; j++) {
+                        if (i === j) continue;
+                        challenges.push({ target: items[i], distractor: items[j] });
+                    }
+                }
+            });
+            challenges.sort(() => Math.random() - 0.5);
+            currentChallengeIndex = 0;
+        }
+
+        function getAudioPath(char) {
+            const clean = char.replace(/\u0640/g, '');
+            const filename = SOUND_FILES[char] || SOUND_FILES[clean] || (clean + ".m4a");
+            return BASE_DIR + filename;
+        }
+
+        function spawnWave() {
+            if (gameState !== 'playing') return;
+            if (currentChallengeIndex >= challenges.length) { winGame(); return; }
+
+            const ch = challenges[currentChallengeIndex];
+            const fullPath = getAudioPath(ch.target);
+            logAudio("Playing: " + ch.target);
+            const audio = new Audio(fullPath);
+            audio.play().catch(e => logAudio("Error: " + ch.target + " (" + e.message + ")"));
+
+            setTimeout(() => {
+                if (gameState !== 'playing') return;
+                fruits = [];
+                let c1Idx = Math.floor(Math.random() * PALETTE.length);
+                let c2Idx = (c1Idx + 1 + Math.floor(Math.random() * (PALETTE.length - 1))) % PALETTE.length;
+                const color1 = PALETTE[c1Idx]; const color2 = PALETTE[c2Idx];
+                const isTargetLeft = Math.random() > 0.5;
+
+                const g = 0.22;
+                const startY = height + 150;
+                const targetPeakY = 80; 
+                const distance = startY - targetPeakY;
+                const perfectVY = -Math.sqrt(2 * g * distance); 
+
+                const createFruit = (text, isLeft, color) => {
+                    const x = isLeft ? width * 0.25 : width * 0.75;
+                    const vx = isLeft ? (Math.random() * 0.8 + 0.5) : -(Math.random() * 0.8 + 0.5);
+                    return new Fruit(text, x, startY, vx, perfectVY, color);
+                };
+
+                const f1 = createFruit(ch.target, isTargetLeft, color1); f1.isTarget = true;
+                const f2 = createFruit(ch.distractor, !isTargetLeft, color2);
+                fruits.push(f1, f2);
+            }, 1000);
+        }
+
+        function sliceFruit(fruit) {
+            if (fruit.sliced) return;
+            fruit.sliced = true;
+            sliceSound.currentTime = 0; sliceSound.play().catch(()=>{});
+            splashes.push(new Splash(fruit.x, fruit.y, fruit.color));
+            splitFruits.push(new SplitFruit(fruit.text, fruit.x, fruit.y, fruit.vx - 4, fruit.vy, fruit.rotation, fruit.color, -1));
+            splitFruits.push(new SplitFruit(fruit.text, fruit.x, fruit.y, fruit.vx + 4, fruit.vy, fruit.rotation, fruit.color, 1));
+            for (let i = 0; i < 25; i++) particles.push(new Particle(fruit.x, fruit.y, fruit.color));
+            if (fruit.isTarget) { score++; currentChallengeIndex++; updateHUD(); setTimeout(spawnWave, 1200); } 
+            else { loseLife(); }
+        }
+
+        function loseLife() {
+            lives--; updateHUD();
+            document.getElementById('flash').style.opacity = 1;
+            setTimeout(() => document.getElementById('flash').style.opacity = 0, 100);
+            if (lives <= 0) { gameOver(); } 
+            else { setTimeout(() => { if (gameState === 'playing') { currentChallengeIndex++; updateHUD(); spawnWave(); } }, 1000); }
+        }
+
+        function updateHUD() {
+            document.getElementById('curr-val').textContent = currentChallengeIndex;
+            document.getElementById('total-val').textContent = challenges.length;
+            document.getElementById('h1').classList.toggle('lost', lives < 1);
+            document.getElementById('h2').classList.toggle('lost', lives < 2);
+            document.getElementById('h3').classList.toggle('lost', lives < 3);
+        }
+
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.classList.add('hidden'); });
+            const el = document.getElementById(id);
+            if(el) { el.classList.remove('hidden'); el.classList.add('active'); }
+        }
+
+        function startGame(mode) {
+            gameState = 'playing'; currentMode = mode; lives = 3; score = 0;
+            fruits = []; particles = []; splitFruits = []; splashes = [];
+            initChallenges(mode); updateHUD();
+            showScreen('hud'); document.getElementById('hud').style.display = 'flex';
+            if (menuMusic) { menuMusic.pause(); menuMusic.currentTime = 0; }
+            spawnWave();
+        }
+
+        function gameOver() { gameState = 'over'; document.getElementById('hud').style.display = 'none'; document.getElementById('over-correct').textContent = score; showScreen('s-over'); if (menuMusic) menuMusic.play(); }
+        function winGame() { gameState = 'win'; document.getElementById('hud').style.display = 'none'; showScreen('s-win'); if (menuMusic) menuMusic.play(); launchVictoryEffects(); }
+
+        function launchVictoryEffects() {
+            const box = document.getElementById('victory-box');
+            for(let i=0; i<100; i++) {
+                const c = document.createElement('div');
+                c.className = 'confetti';
+                c.style.left = Math.random() * 100 + '%';
+                c.style.backgroundColor = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+                c.style.animationDelay = Math.random() * 3 + 's';
+                box.appendChild(c);
+            }
+        }
+
+        function checkSlice(p1, p2) {
+            fruits.forEach(f => {
+                if (f.sliced) return;
+                const dist = distToSegment({x: f.x, y: f.y}, p1, p2);
+                if (dist < f.radius * 1.3) sliceFruit(f);
+            });
+        }
+        function distToSegment(p, v, w) {
+            const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+            if (l2 === 0) return Math.sqrt(Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2));
+            let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.sqrt(Math.pow(p.x - (v.x + t * (w.x - v.x)), 2) + Math.pow(p.y - (v.y + t * (w.y - v.y)), 2));
+        }
+
+        canvas.onmousedown = e => { isDrawing = true; lastPos = {x: e.clientX, y: e.clientY}; trails = [lastPos]; };
+        window.onmousemove = e => {
+            if (!isDrawing || gameState !== 'playing') return;
+            const cur = {x: e.clientX, y: e.clientY};
+            checkSlice(lastPos, cur); lastPos = cur;
+            trails.push(cur); if (trails.length > 20) trails.shift();
+        };
+        window.onmouseup = () => { isDrawing = false; trails = []; };
+
+        canvas.ontouchstart = e => { isDrawing = true; lastPos = {x: e.touches[0].clientX, y: e.touches[0].clientY}; trails = [lastPos]; };
+        canvas.ontouchmove = e => {
+            if (!isDrawing || gameState !== 'playing') return;
+            const cur = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+            checkSlice(lastPos, cur); lastPos = cur;
+            trails.push(cur); if (trails.length > 20) trails.shift();
+            e.preventDefault();
+        };
+        canvas.ontouchend = () => { isDrawing = false; trails = []; };
+
+        document.getElementById('btn-play').onclick = () => { showScreen('s-mode'); menuMusic.play().catch(e => logAudio("Song Blocked: " + e.message)); };
+        document.getElementById('btn-back-menu').onclick = () => showScreen('s-menu');
+        document.getElementById('mode-ortho').onclick = () => startGame('ortho');
+        document.getElementById('mode-phone').onclick = () => startGame('phone');
+        document.getElementById('btn-retry').onclick = () => startGame(currentMode);
+        document.getElementById('btn-replay').onclick = () => startGame(currentMode);
+        document.getElementById('btn-menu-over').onclick = () => showScreen('s-menu');
+        document.getElementById('btn-menu-win').onclick = () => showScreen('s-menu');
+        document.getElementById('btn-exit-game').onclick = () => { gameState='menu'; showScreen('s-menu'); document.getElementById('hud').style.display='none'; menuMusic.play(); };
+
+        function loop() {
+            const bgGrad = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, width);
+            bgGrad.addColorStop(0, '#1a1a1a'); bgGrad.addColorStop(1, '#050505');
+            ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, width, height);
+
+            if (gameState === 'playing' || gameState === 'over' || gameState === 'win') {
+                splashes.forEach((s, i) => { s.update(); s.draw(); if (s.alpha <= 0) splashes.splice(i, 1); });
+                fruits.forEach((f, i) => {
+                    f.update(); f.draw();
+                    if (f.y > height + 250 && !f.sliced) {
+                        fruits.splice(i, 1);
+                        if (f.isTarget) loseLife();
+                    }
+                });
+                particles.forEach((p, i) => { p.update(); p.draw(); if (p.alpha <= 0) particles.splice(i, 1); });
+                splitFruits.forEach((s, i) => { s.update(); s.draw(); if (s.alpha <= 0 || s.y > height + 250) splitFruits.splice(i, 1); });
+                if (trails.length > 1) {
+                    ctx.beginPath(); ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'; ctx.lineWidth = 12; ctx.lineCap = 'round';
+                    ctx.shadowColor = '#fff'; ctx.shadowBlur = 25;
+                    trails.forEach((t, i) => { if (i === 0) ctx.moveTo(t.x, t.y); else ctx.lineTo(t.x, t.y); });
+                    ctx.stroke(); ctx.shadowBlur = 0;
+                }
+            }
+            requestAnimationFrame(loop);
+        }
+        loop();
+    </script>
+</body>
+</html>
