@@ -1253,26 +1253,68 @@
         ];
 
         const menuMusic = new Audio(MENU_SONG_PATH); menuMusic.loop = true;
-        const sliceSound = new Audio(SLICE_SOUND_PATH);
-        const letterAudioCache = {};
+
+        // ── Zero-latency audio: pre-decode all sounds as AudioBuffers ──
+        // Avoids iOS cloneNode() lag and silent-play-warmup double-sound bug.
+        const letterAudioBuffers = {}; // path → AudioBuffer (null = failed)
+        let   sliceSoundBuffer   = null;
+        let   spawnPending       = false; // guard against double wave spawns
+
+        async function _fetchDecodeBuffer(url) {
+            try {
+                const resp = await fetch(url, { mode: 'cors' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const ab = await resp.arrayBuffer();
+                // Use callback form — safe on all WebKit versions
+                return await new Promise((res, rej) =>
+                    audioCtx.decodeAudioData(ab, res, rej)
+                );
+            } catch(e) {
+                console.warn('[Audio] load failed:', url, e.message);
+                return null;
+            }
+        }
+
+        function _playBuffer(buffer, volume = 1) {
+            if (!buffer) return;
+            resumeAudioCtx();
+            try {
+                const src  = audioCtx.createBufferSource();
+                const gain = audioCtx.createGain();
+                src.buffer        = buffer;
+                gain.gain.value   = volume;
+                src.connect(gain);
+                gain.connect(audioCtx.destination);
+                src.start(0); // truly synchronous — zero latency on iOS
+            } catch(e) { console.warn('[Audio] playback error:', e); }
+        }
+
+        async function _ensureLetterBuffer(path) {
+            if (!letterAudioBuffers.hasOwnProperty(path)) {
+                letterAudioBuffers[path] = await _fetchDecodeBuffer(path);
+            }
+            return letterAudioBuffers[path];
+        }
+
+        async function _ensureSliceBuffer() {
+            if (!sliceSoundBuffer) {
+                sliceSoundBuffer = await _fetchDecodeBuffer(SLICE_SOUND_PATH);
+            }
+        }
 
         function warmupAllAudio() {
-            const promises = [];
+            resumeAudioCtx();
+            const paths = new Set();
             challenges.forEach(ch => {
-                [ch.target, ch.distractor].forEach(char => {
-                    const path = getAudioPath(char);
-                    if (!letterAudioCache[path]) {
-                        const a = new Audio(path);
-                        letterAudioCache[path] = a;
-                        a.volume = 0;
-                        const p = a.play().then(()=>{ a.pause(); a.currentTime=0; a.volume=1; }).catch(()=>{});
-                        promises.push(p);
-                    }
-                });
+                [ch.target, ch.distractor].forEach(char => paths.add(getAudioPath(char)));
             });
-            sliceSound.volume = 0;
-            promises.push(sliceSound.play().then(()=>{ sliceSound.pause(); sliceSound.currentTime=0; sliceSound.volume=1; }).catch(()=>{}));
-            return Promise.allSettled(promises);
+            const promises = [...paths].map(p => _ensureLetterBuffer(p));
+            promises.push(_ensureSliceBuffer());
+            // Never block more than 4 s — start the game even on slow networks
+            return Promise.race([
+                Promise.allSettled(promises),
+                new Promise(res => setTimeout(res, 4000))
+            ]);
         }
 
         const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === 'true';
@@ -1309,19 +1351,33 @@
             return BASE_DIR + filename.split('/').map(encodeURIComponent).join('/');
         }
 
-        function spawnWave() {
+        async function spawnWave() {
             if (gameState !== 'playing') return;
-            if (currentChallengeIndex >= challenges.length) { winGame(); return; }
+            if (spawnPending) return; // prevent double-spawn
+            spawnPending = true;
+
+            if (currentChallengeIndex >= challenges.length) {
+                spawnPending = false;
+                winGame();
+                return;
+            }
 
             const ch = challenges[currentChallengeIndex];
             const fullPath = getAudioPath(ch.target);
-            logAudio('Playing: '+ch.target);
-            const audio = letterAudioCache[fullPath] || new Audio(fullPath);
-            if (!letterAudioCache[fullPath]) letterAudioCache[fullPath] = audio;
-            audio.pause(); audio.currentTime = 0;
-            setTimeout(()=>{ audio.play().catch(e=>logAudio('Error: '+ch.target+' ('+e.message+')')); }, 0);
+            logAudio('Playing: ' + ch.target);
+
+            // Load on-demand if warmup missed this buffer (e.g. network timeout)
+            await _ensureLetterBuffer(fullPath);
+
+            // Re-check state in case game ended while awaiting
+            if (gameState !== 'playing') { spawnPending = false; return; }
+
+            // Play letter audio via AudioContext — zero latency, no double-play
+            resumeAudioCtx();
+            _playBuffer(letterAudioBuffers[fullPath]);
 
             setTimeout(() => {
+                spawnPending = false;
                 if (gameState !== 'playing') return;
                 fruits = [];
                 const isTargetLeft = Math.random() > 0.5;
@@ -1335,8 +1391,8 @@
                 if (t2 >= t1) t2++;
 
                 const createFruit = (text, isLeft, typeIdx) => {
-                    const x = isLeft ? width*0.3 : width*0.7;
-                    const vx = isLeft ? (Math.random()*0.4-0.4) : (Math.random()*0.4);
+                    const x = isLeft ? width * 0.3 : width * 0.7;
+                    const vx = isLeft ? (Math.random() * 0.4 - 0.4) : (Math.random() * 0.4);
                     return new Fruit(text, x, startY, vx, perfectVY, typeIdx);
                 };
                 const f1 = createFruit(ch.target, isTargetLeft, t1); f1.isTarget = true;
@@ -1399,11 +1455,8 @@
         function sliceFruit(fruit, cutAngle = 0) {
             if (fruit.sliced) return;
             fruit.sliced = true;
-            resumeAudioCtx();
-            // Clone so simultaneous slices each get their own playback instance
-            const _ss = sliceSound.cloneNode();
-            _ss.volume = 1;
-            _ss.play().catch(()=>{});
+            // Play via AudioContext BufferSource — zero latency on iOS (no cloneNode lag)
+            _playBuffer(sliceSoundBuffer);
             // Add persistent juice stain on background
             addJuiceStain(fruit.x, fruit.y, fruit.ftype.juice);
             // Organic juice splash blobs
@@ -1458,6 +1511,8 @@
         }
 
         function startGame(mode) {
+            resumeAudioCtx(); // ensure AudioContext is running before warmup
+            spawnPending = false; // clear any stale guard from previous game
             gameState='playing'; currentMode=mode; lives=3; score=0;
             streak=0; totalAttempts=0; gameStartTime=Date.now();
             fruits=[]; particles=[]; splitFruits=[]; splashes=[];
@@ -1477,15 +1532,17 @@
         }
 
         function gameOver() {
+            spawnPending = false;
             gameState='over';
             document.getElementById('hud').style.display='none';
             document.getElementById('over-correct').textContent=score;
             if(currentMode==='ortho') savePartialProgress(currentLevel, currentChallengeIndex, challenges.length);
             showScreen('s-over');
-            if(menuMusic) menuMusic.play();
+            if(menuMusic) menuMusic.play().catch(()=>{});
         }
 
         function winGame() {
+            spawnPending = false;
             gameState='win';
             document.getElementById('hud').style.display='none';
             const elapsed=Math.round((Date.now()-gameStartTime)/1000);
@@ -1503,7 +1560,7 @@
                 nextBtn.style.display='none';
             }
             showScreen('s-win');
-            if(menuMusic) menuMusic.play();
+            if(menuMusic) menuMusic.play().catch(()=>{});
             launchVictoryEffects();
         }
 
@@ -1536,24 +1593,40 @@
             return Math.sqrt(Math.pow(p.x-(v.x+t*(w.x-v.x)),2)+Math.pow(p.y-(v.y+t*(w.y-v.y)),2));
         }
 
-        // ── Input handlers (unchanged) ──
-        canvas.onmousedown=e=>{resumeAudioCtx();isDrawing=true;lastPos={x:e.clientX,y:e.clientY};trails=[lastPos];};
-        window.onmousemove=e=>{
-            if(!isDrawing||gameState!=='playing')return;
-            const cur={x:e.clientX,y:e.clientY};
-            checkSlice(lastPos,cur);lastPos=cur;
-            trails.push(cur); if(trails.length>24)trails.shift();
-        };
-        window.onmouseup=()=>{isDrawing=false;trails=[];};
-        canvas.ontouchstart=e=>{resumeAudioCtx();isDrawing=true;lastPos={x:e.touches[0].clientX,y:e.touches[0].clientY};trails=[lastPos];};
-        canvas.ontouchmove=e=>{
-            if(!isDrawing||gameState!=='playing')return;
-            const cur={x:e.touches[0].clientX,y:e.touches[0].clientY};
-            checkSlice(lastPos,cur);lastPos=cur;
-            trails.push(cur); if(trails.length>24)trails.shift();
-            e.preventDefault();
-        };
-        canvas.ontouchend=()=>{isDrawing=false;trails=[];};
+        // ── Input handlers ──
+        canvas.addEventListener('mousedown', e => {
+            resumeAudioCtx();
+            isDrawing = true;
+            lastPos = { x: e.clientX, y: e.clientY };
+            trails = [lastPos];
+        });
+        window.addEventListener('mousemove', e => {
+            if (!isDrawing || gameState !== 'playing') return;
+            const cur = { x: e.clientX, y: e.clientY };
+            checkSlice(lastPos, cur); lastPos = cur;
+            trails.push(cur); if (trails.length > 24) trails.shift();
+        });
+        window.addEventListener('mouseup', () => { isDrawing = false; trails = []; });
+
+        canvas.addEventListener('touchstart', e => {
+            resumeAudioCtx();
+            isDrawing = true;
+            lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            trails = [lastPos];
+        }, { passive: true });
+
+        // passive:false required so e.preventDefault() actually blocks scroll
+        canvas.addEventListener('touchmove', e => {
+            if (!isDrawing || gameState !== 'playing') return;
+            const cur = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            checkSlice(lastPos, cur); lastPos = cur;
+            trails.push(cur); if (trails.length > 24) trails.shift();
+            e.preventDefault(); // stop page scroll during swipe
+        }, { passive: false });
+
+        // touchend AND touchcancel — iOS fires cancel on notification/swipe-up
+        canvas.addEventListener('touchend',    () => { isDrawing = false; trails = []; });
+        canvas.addEventListener('touchcancel', () => { isDrawing = false; trails = []; });
 
         // ── Button handlers (unchanged) ──
         // User screen wiring
@@ -1573,13 +1646,13 @@
         document.getElementById('btn-play').onclick=()=>{ resumeAudioCtx(); showScreen('s-mode'); menuMusic.play().catch(e=>logAudio('Song Blocked: '+e.message)); };
         document.getElementById('btn-back-menu').onclick=()=>showScreen('s-menu');
         document.getElementById('btn-back-mode').onclick=()=>showScreen('s-mode');
-        document.getElementById('mode-ortho').onclick=()=>{ renderLevelSelect(); showScreen('s-level-select'); };
-        document.getElementById('mode-phone').onclick=()=>startGame('phone');
+        document.getElementById('mode-ortho').onclick=()=>{ resumeAudioCtx(); renderLevelSelect(); showScreen('s-level-select'); };
+        document.getElementById('mode-phone').onclick=()=>{ resumeAudioCtx(); startGame('phone'); };
         document.querySelectorAll('.level-btn').forEach(btn=>{
             btn.onclick=()=>{ currentLevel=parseInt(btn.dataset.level); startGame('ortho'); };
         });
-        document.getElementById('btn-retry').onclick=()=>startGame(currentMode);
-        document.getElementById('btn-replay').onclick=()=>startGame(currentMode);
+        document.getElementById('btn-retry').onclick=()=>{ resumeAudioCtx(); startGame(currentMode); };
+        document.getElementById('btn-replay').onclick=()=>{ resumeAudioCtx(); startGame(currentMode); };
         document.getElementById('btn-next-level').onclick=()=>{
             resumeAudioCtx();
             currentLevel++;
@@ -1592,11 +1665,16 @@
         };
         document.getElementById('btn-menu-over').onclick=()=>showScreen('s-menu');
         document.getElementById('btn-menu-win').onclick=()=>showScreen('s-menu');
-        document.getElementById('btn-exit-game').onclick=()=>{ gameState='menu'; showScreen('s-menu'); document.getElementById('hud').style.display='none'; menuMusic.play(); };
+        document.getElementById('btn-exit-game').onclick=()=>{ gameState='menu'; showScreen('s-menu'); document.getElementById('hud').style.display='none'; menuMusic.play().catch(()=>{}); };
         document.getElementById('btn-pause-game').onclick=()=>pauseGame();
-        document.getElementById('btn-resume').onclick=()=>resumeGame();
-        document.getElementById('btn-quit-pause').onclick=()=>{ gameState='menu'; document.getElementById('hud').style.display='none'; showScreen('s-menu'); menuMusic.play(); };
+        document.getElementById('btn-resume').onclick=()=>{ resumeAudioCtx(); resumeGame(); };
+        document.getElementById('btn-quit-pause').onclick=()=>{ gameState='menu'; document.getElementById('hud').style.display='none'; showScreen('s-menu'); menuMusic.play().catch(()=>{}); };
         document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(gameState==='playing')pauseGame(); else if(gameState==='paused')resumeGame(); } });
+
+        // Resume AudioContext when the user comes back to the page (iOS suspends it on background)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) resumeAudioCtx();
+        });
 
         // ════════════════════════════════════════════════════════════════════
         //  RENDER LOOP
@@ -1611,15 +1689,19 @@
             bgG.addColorStop(1,'#060518');
             ctx.fillStyle = bgG; ctx.fillRect(0,0,width,height);
 
-            // Bokeh orbs
+            // Bokeh orbs — radial gradient (avoids ctx.filter blur which destroys mobile FPS)
             bokeh.forEach(b => {
                 const pulse = Math.sin(starTime*b.speed*60+b.phase)*0.4+0.6;
+                // Parse hex color once; build rgba stop at zero alpha for soft edge
+                const h = b.color.replace('#','');
+                const cr = parseInt(h.slice(0,2),16), cg = parseInt(h.slice(2,4),16), cb = parseInt(h.slice(4,6),16);
+                const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 2.2);
+                grad.addColorStop(0,   `rgba(${cr},${cg},${cb},${b.alpha * pulse})`);
+                grad.addColorStop(0.4, `rgba(${cr},${cg},${cb},${b.alpha * pulse * 0.55})`);
+                grad.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
                 ctx.save();
-                ctx.globalAlpha = b.alpha * pulse;
-                ctx.fillStyle = b.color;
-                ctx.filter = 'blur(28px)';
-                ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
-                ctx.filter = 'none';
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2.2, 0, Math.PI*2); ctx.fill();
                 ctx.restore();
             });
 
